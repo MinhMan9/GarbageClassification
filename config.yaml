@@ -1,0 +1,17 @@
+# Cấu hình dùng chung cho cả nhóm. KHÔNG tự ý sửa: đổi ở đây là đổi cho tất cả mọi người.
+# Đường dẫn tương đối được tính từ thư mục gốc của repo (nơi có file này).
+
+seed: 42                      # seed duy nhất dùng cho mọi nơi (chia tập, mô hình, ...)
+
+# ---- Đường dẫn ----
+raw_dir: data/raw             # ảnh gốc, mỗi lớp một thư mục con. Có thể ghi đè bằng biến môi trường GARBAGE_RAW_DIR
+inspect_cache_path: data/raw_inspect.csv   # kết quả kiểm tra từng ảnh (do notebook 00 tạo)
+manifest_path: data/manifest.csv           # danh sách ảnh sạch (do notebook 01 tạo)
+splits_path: splits.json                   # dev/test + 5 fold (do notebook 01 tạo)
+features_dir: artifacts/features           # file đặc trưng .npy
+results_dir: artifacts/results             # kết quả đánh giá, dự đoán
+figures_dir: artifacts/figures             # biểu đồ xuất ra cho báo cáo
+
+# ---- Chia tập ----
+test_size: 0.2                # tỷ lệ final test (niêm phong đến khi đánh giá cuối)
+n_splits: 5                   # số fold trên tập dev

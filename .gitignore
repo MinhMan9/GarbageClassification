@@ -1,0 +1,15 @@
+# Dữ liệu và sản phẩm sinh ra khi chạy: nặng, không commit
+data/
+artifacts/
+
+# Python / Jupyter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# Hệ điều hành / editor
+.DS_Store
+.idea/
+.vscode/

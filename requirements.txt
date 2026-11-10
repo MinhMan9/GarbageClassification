@@ -1,0 +1,17 @@
+# Thư viện cần cài: pip install -r requirements.txt
+numpy>=1.24
+pandas>=2.0
+scikit-learn>=1.3
+scipy>=1.10
+matplotlib>=3.7
+pillow>=10.0
+pyyaml>=6.0
+jupyter>=1.0
+
+# Trích đặc trưng truyền thống
+scikit-image>=0.21
+opencv-python>=4.8        # SIFT có sẵn trong bản chính từ OpenCV 4.4
+
+# Trích đặc trưng học sâu. Cài torch theo hướng dẫn trên pytorch.org nếu cần bản GPU
+torch>=2.1
+torchvision>=0.16
