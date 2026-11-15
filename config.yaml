@@ -15,3 +15,7 @@ figures_dir: artifacts/figures             # biểu đồ xuất ra cho báo cá
 # ---- Chia tập ----
 test_size: 0.2                # tỷ lệ final test (niêm phong đến khi đánh giá cuối)
 n_splits: 5                   # số fold trên tập dev
+
+# ---- Đặc trưng truyền thống (03_extract_traditional) ----
+bovw_k: 500                   # số từ trong từ điển BoVW (KMeans)
+bovw_desc_per_image: 50       # số descriptor SIFT lấy mẫu mỗi ảnh để fit từ điển
