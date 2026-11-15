@@ -7,6 +7,8 @@ matplotlib>=3.7
 pillow>=10.0
 pyyaml>=6.0
 jupyter>=1.0
+kagglehub>=0.2  
+seaborn>=0.13.0,<1
 
 # Trích đặc trưng truyền thống
 scikit-image>=0.21
