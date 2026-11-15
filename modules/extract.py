@@ -97,11 +97,14 @@ def _resize(img, size):
     # ACTIVE["resize"] = "short224_center_crop"
     # short = size
     # ===== hết [RESIZE] =====
+    # Làm tròn đúng như torchvision T.Resize + T.CenterCrop để ảnh trùng từng pixel với eval_tf của 02
     w, h = img.size
-    s = short / min(w, h)
-    img = img.resize((max(short, round(w * s)), max(short, round(h * s))), Image.BILINEAR)
-    w, h = img.size
-    left, top = (w - size) // 2, (h - size) // 2
+    if w <= h:
+        new_w, new_h = short, int(short * h / w)
+    else:
+        new_w, new_h = int(short * w / h), short
+    img = img.resize((new_w, new_h), Image.BILINEAR)
+    left, top = int(round((new_w - size) / 2.0)), int(round((new_h - size) / 2.0))
     return img.crop((left, top, left + size, top + size))
 
 
