@@ -17,3 +17,4 @@ opencv-python>=4.8        # SIFT có sẵn trong bản chính từ OpenCV 4.4
 # Trích đặc trưng học sâu. Cài torch theo hướng dẫn trên pytorch.org nếu cần bản GPU
 torch>=2.1
 torchvision>=0.16
+tqdm>=4.65                # thanh tiến trình khi trích đặc trưng deep

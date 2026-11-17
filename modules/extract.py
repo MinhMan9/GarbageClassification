@@ -1,4 +1,4 @@
-"""Trích đặc trưng (notebook 03: truyền thống; 04: deep sẽ thêm vào phần "Deep" cuối file).
+"""Trích đặc trưng (notebook 03: truyền thống; notebook 04: deep, phần "Deep" cuối file).
 
 # Traditional
 Đặc trưng: hog, sift_bovw, color_hist, color_moments, lbp và đặc trưng ghép hog_color.
@@ -25,6 +25,16 @@ rồi chạy lại notebook 03 (chỉ đặc trưng bị ảnh hưởng mới c�
     [COLOR_REGION] _region           : vùng tính màu (1: cả ảnh | 2: 60% ở giữa, bớt ảnh hưởng của nền)
     [LBP]         _lbp_vector        : (1: P8 R1 lưới 4x4 = 160 chiều | 2: toàn ảnh P8 R1 = 10 | 3: toàn ảnh P16 R2 = 18)
     [COMBINE]     combine_features   : ghép đặc trưng (1: L2-chuẩn hóa từng phần rồi nối | 2: nối thẳng)
+
+# Deep
+Đặc trưng: resnet50 (2048), efficientnet_b0 (1280), vit_b16 (768), lấy từ mạng pretrain ImageNet của torchvision,
+đóng băng hoàn toàn (eval + inference_mode, không augmentation), bỏ head phân loại, giữ vector lớp áp chót.
+Ảnh nạp qua cùng load_image như trên rồi chuẩn hóa mean/std ImageNet, tức đúng eval_tf của 02.
+Đổi phương án theo cùng cách như trên, rồi chạy lại notebook 04.
+
+    [RESNET_WEIGHTS] _deep_weights   : trọng số ResNet-50 (1: IMAGENET1K_V1 | 2: IMAGENET1K_V2)
+    [DEEP_SIZE]      _deep_size      : cỡ ảnh vào mạng (1: 224 | 2: 128, ViT bị bỏ qua)
+    [DEEP_NORM]      _deep_norm      : hậu xử lý (1: lưu thô | 2: L2-chuẩn hóa từng dòng)
 
 Đừng đặt ghi chú tự do bên trong các khối: công cụ kiểm thử bật/tắt khối bằng cách thêm/bỏ tiền tố "# ".
 """
@@ -369,11 +379,14 @@ def extract_simple(name, meta, cfg, n_jobs=None):
     return X, {"seconds": round(time.time() - t, 1)}
 
 
-def feature_summary(cfg):
-    """Bảng tóm tắt mọi đặc trưng đã lưu trong features_dir: số chiều, dung lượng, dòng toàn 0, cấu hình đã dùng."""
+def feature_summary(cfg, names=None):
+    """Bảng tóm tắt các đặc trưng đã lưu trong features_dir: số chiều, dung lượng, dòng toàn 0, cấu hình đã dùng.
+
+    names: chỉ lấy các đặc trưng này (vd list(DEEP_MODELS)); bỏ trống = mọi đặc trưng.
+    """
     rows = []
     for fn in sorted(os.listdir(cfg["features_dir"])):
-        if not fn.endswith(".json"):
+        if not fn.endswith(".json") or (names is not None and fn[:-5] not in names):
             continue
         with open(os.path.join(cfg["features_dir"], fn), encoding="utf-8") as f:
             meta = json.load(f)
@@ -382,7 +395,8 @@ def feature_summary(cfg):
                      "MB": round(X.nbytes / 1e6, 1), "dòng toàn 0": int((~X.any(axis=1)).sum()),
                      "giây": meta.get("seconds"), "ảnh không có descriptor": meta.get("images_without_descriptors"),
                      "resize": meta["extract"].get("resize")})
-    return pd.DataFrame(rows).set_index("đặc trưng")
+    df = pd.DataFrame(rows).set_index("đặc trưng")
+    return df if names is None else df.dropna(axis=1, how="all")
 
 
 def fill_active():
@@ -394,6 +408,7 @@ def fill_active():
     _lbp_vector(_gray(img))
     _sift_descriptors(_gray(img))
     _resize(img, 8)
+    _fill_deep_active()
 
 
 # --------------------------------------------------------------------------- #
@@ -536,4 +551,193 @@ def norm_table(named_parts):
                          for name, X in named_parts.items()}).T.round(3)
 
 
-# Deep
+# =========================================================================== #
+# Deep (notebook 04): đặc trưng từ mạng pretrain ImageNet, đóng băng (không huấn luyện)
+# =========================================================================== #
+# Tên đặc trưng -> (kiến trúc torchvision, tên thuộc tính của head phân loại, số chiều đặc trưng)
+DEEP_MODELS = {
+    "resnet50": ("resnet50", "fc", 2048),               # đầu ra global average pooling
+    "efficientnet_b0": ("efficientnet_b0", "classifier", 1280),  # đầu ra global average pooling
+    "vit_b16": ("vit_b_16", "heads", 768),              # token [CLS] sau LayerNorm cuối
+}
+
+
+def _deep_weights(name):
+    """Tên bộ trọng số torchvision dùng cho từng mô hình."""
+    if name == "resnet50":
+        # ===== [RESNET_WEIGHTS] CÁCH 1: IMAGENET1K_V1 - công thức train gốc, top-1 ImageNet 76.1% (ĐANG DÙNG) =====
+        ACTIVE["resnet_weights"] = "IMAGENET1K_V1"
+        # ===== [RESNET_WEIGHTS] CÁCH 2: IMAGENET1K_V2 - công thức mới nhiều augmentation/regularization, top-1 80.9% (đang tắt) =====
+        # ACTIVE["resnet_weights"] = "IMAGENET1K_V2"
+        # ===== hết [RESNET_WEIGHTS] =====
+        return "ResNet50_Weights." + ACTIVE["resnet_weights"]
+    return {"efficientnet_b0": "EfficientNet_B0_Weights.IMAGENET1K_V1",
+            "vit_b16": "ViT_B_16_Weights.IMAGENET1K_V1"}[name]
+
+
+def _deep_size():
+    """Cỡ ảnh đưa vào mạng."""
+    # ===== [DEEP_SIZE] CÁCH 1: 224 - đúng độ phân giải lúc pretrain (ĐANG DÙNG) =====
+    ACTIVE["deep_size"] = 224
+    # ===== [DEEP_SIZE] CÁCH 2: 128 - ablation độ phân giải thấp; ViT-B/16 không hỗ trợ nên bị bỏ qua (đang tắt) =====
+    # ACTIVE["deep_size"] = 128
+    # ===== hết [DEEP_SIZE] =====
+    return ACTIVE["deep_size"]
+
+
+def _deep_norm(X):
+    """Hậu xử lý ma trận đặc trưng deep trước khi lưu."""
+    # ===== [DEEP_NORM] CÁCH 1: lưu vector thô (ĐANG DÙNG) =====
+    ACTIVE["deep_norm"] = "raw"
+    # ===== [DEEP_NORM] CÁCH 2: L2-chuẩn hóa từng dòng (đang tắt) =====
+    # ACTIVE["deep_norm"] = "l2"
+    # X = X / (np.linalg.norm(X, axis=1, keepdims=True) + 1e-12)
+    # ===== hết [DEEP_NORM] =====
+    return X
+
+
+def _fill_deep_active():
+    _deep_weights("resnet50")
+    _deep_size()
+    _deep_norm(np.zeros((1, 1), np.float32))
+
+
+def get_device():
+    """mps (Mac) -> cuda -> cpu."""
+    import torch
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def _to_tensor(img, cfg):
+    """PIL RGB -> tensor (3, H, W) chuẩn hóa mean/std ImageNet, đúng như phần cuối eval_tf của 02."""
+    import torch
+    x = torch.from_numpy(np.asarray(img, dtype=np.float32) / 255.0).permute(2, 0, 1)
+    mean = torch.tensor(cfg["prep"]["mean"]).view(3, 1, 1)
+    std = torch.tensor(cfg["prep"]["std"]).view(3, 1, 1)
+    return (x - mean) / std
+
+
+def _uint8_one(rel):
+    return np.asarray(_load(rel), dtype=np.uint8)
+
+
+def image_cache(meta, cfg, size, n_jobs=None):
+    """Mảng uint8 (N, size, size, 3) của mọi ảnh trong meta sau load_image, lưu ở artifacts/cache/ và mở bằng memmap.
+
+    Giải mã + resize ảnh chỉ làm MỘT lần (song song nhiều tiến trình như notebook 03), sau đó cả ba mạng
+    đọc thẳng từng batch từ đĩa. Cách này nhanh hơn DataLoader nhiều worker, vốn làm máy RAM ít bị swap.
+    Cache tự sinh lại nếu danh sách ảnh, cỡ ảnh hoặc phương án [RESIZE] thay đổi.
+    """
+    import hashlib
+    from tqdm.auto import tqdm
+    _resize(Image.new("RGB", (8, 8)), 8)             # điền ACTIVE["resize"]
+    cache_dir = os.path.join(ROOT, "artifacts", "cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    base = os.path.join(cache_dir, f"images_{size}_{ACTIVE['resize']}")
+    key = {"n": len(meta), "size": size, "resize": ACTIVE["resize"],
+           "paths_sha1": hashlib.sha1("\n".join(meta["path"]).encode()).hexdigest()}
+    if os.path.exists(base + ".json") and os.path.exists(base + ".npy"):
+        with open(base + ".json", encoding="utf-8") as f:
+            if json.load(f) == key:
+                return np.load(base + ".npy", mmap_mode="r")
+    arr = np.lib.format.open_memmap(base + ".tmp.npy", mode="w+", dtype=np.uint8, shape=(len(meta), size, size, 3))
+    with ProcessPoolExecutor(n_jobs or os.cpu_count(), initializer=_init_worker,
+                             initargs=({**cfg, "img_size": size}, None)) as pool:
+        for i, a in enumerate(tqdm(pool.map(_uint8_one, meta["path"].tolist(), chunksize=32),
+                                   total=len(meta), desc=f"cache ảnh {size}px", unit="ảnh")):
+            arr[i] = a
+    arr.flush()
+    del arr
+    os.replace(base + ".tmp.npy", base + ".npy")
+    with open(base + ".json", "w", encoding="utf-8") as f:
+        json.dump(key, f, indent=1)
+    return np.load(base + ".npy", mmap_mode="r")
+
+
+def build_backbone(name, device=None):
+    """Nạp mạng pretrain, tách head phân loại. Trả về (backbone, head, weights).
+
+    backbone(x) -> vector đặc trưng; head(vector) -> logits 1000 lớp ImageNet (chỉ dùng để minh họa).
+    """
+    import torch
+    import torchvision
+    arch, head_attr, _ = DEEP_MODELS[name]
+    weights = torchvision.models.get_weight(_deep_weights(name))
+    model = torchvision.models.get_model(arch, weights=weights)
+    head = getattr(model, head_attr)
+    setattr(model, head_attr, torch.nn.Identity())
+    device = device or get_device()
+    return model.eval().to(device), head.eval().to(device), weights
+
+
+def extract_deep(name, meta, cfg, batch_size=64, device=None):
+    """Trích đặc trưng deep cho mọi ảnh trong meta (giữ thứ tự dòng), có thanh tiến trình.
+
+    Trả về (X, thống kê); X = None nếu cấu hình hiện tại không hỗ trợ mô hình này (ViT với ảnh khác 224).
+    """
+    import torch
+    from tqdm.auto import tqdm
+    _fill_deep_active()
+    size = _deep_size()
+    if name == "vit_b16" and size != 224:
+        return None, {"skipped": f"ViT-B/16 của torchvision chỉ nhận ảnh 224x224, đang đặt [DEEP_SIZE] = {size}"}
+    device = device or get_device()
+    torch.manual_seed(cfg["seed"])
+    imgs = image_cache(meta, cfg, size)
+    model, _, weights = build_backbone(name, device)
+    mean = torch.tensor(cfg["prep"]["mean"], device=device).view(1, 3, 1, 1)
+    std = torch.tensor(cfg["prep"]["std"], device=device).view(1, 3, 1, 1)
+    t = time.time()
+    out = []
+    with torch.inference_mode(), tqdm(total=len(imgs), desc=name, unit="ảnh") as bar:
+        for s in range(0, len(imgs), batch_size):
+            x = torch.from_numpy(np.ascontiguousarray(imgs[s:s + batch_size])).to(device)
+            x = (x.permute(0, 3, 1, 2).float() / 255.0 - mean) / std      # = ToTensor + Normalize của eval_tf
+            out.append(model(x).float().cpu().numpy())
+            bar.update(len(x))
+    X = _deep_norm(np.concatenate(out))
+    return X, {"seconds": round(time.time() - t, 1), "device": device, "weights": str(weights),
+               "input_size": size, "dims": int(X.shape[1]),
+               "preprocess": f"load_rgb -> cạnh ngắn {int(size * 256 / 224)} (bilinear) -> cắt giữa {size} "
+                             "-> chuẩn hóa mean/std ImageNet (eval_tf của 02)"}
+
+
+def run_deep(name, meta, cfg, **kw):
+    """Trích + kiểm tra + lưu một đặc trưng deep, in thống kê. Trả về X (None nếu bị bỏ qua)."""
+    X, st = extract_deep(name, meta, cfg, **kw)
+    if X is None:
+        print(f"BỎ QUA {name}: {st['skipped']}")
+        return None
+    print(name, check_features(X, meta), st)
+    save_features(name, X, cfg, st)
+    return X
+
+
+def show_deep_demo(cfg, rel, name, topk=5):
+    """Ảnh đầu vào (sau tiền xử lý) -> vector đặc trưng -> top-k lớp ImageNet khi gắn lại head gốc."""
+    import matplotlib.pyplot as plt
+    import torch
+    _fill_deep_active()
+    size = 224 if name == "vit_b16" else _deep_size()
+    model, head, weights = build_backbone(name, "cpu")
+    img = load_image(rel, size)
+    with torch.inference_mode():
+        feat = model(_to_tensor(img, cfg)[None])
+        prob = head(feat).softmax(1)[0]
+    feat = feat[0].numpy()
+    p, i = prob.topk(topk)
+    cats = weights.meta["categories"]
+    fig, ax = plt.subplots(1, 3, figsize=(14, 3.4), gridspec_kw={"width_ratios": [1, 2.2, 1.4]})
+    ax[0].imshow(img); ax[0].set_title(f"Ảnh đầu vào {size}x{size}"); ax[0].axis("off")
+    ax[1].bar(range(len(feat)), feat, width=1.0, color="tab:blue")
+    ax[1].set_xlim(-1, len(feat))
+    ax[1].set_title(f"Vector đặc trưng {len(feat)} chiều (min {feat.min():.2f}, max {feat.max():.2f})")
+    ax[1].set_xlabel("chiều")
+    ax[2].barh(range(topk)[::-1], p.numpy(), color="tab:orange")
+    ax[2].set_yticks(range(topk)[::-1]); ax[2].set_yticklabels([cats[k] for k in i.tolist()], fontsize=8)
+    ax[2].set_xlim(0, 1); ax[2].set_title(f"Top-{topk} ImageNet (head gốc)")
+    fig.suptitle(f"{name} ({weights})", fontsize=10)
+    fig.tight_layout()
+    return fig
